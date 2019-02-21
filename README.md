@@ -5,5 +5,6 @@ In this competition you are asked to predict the forest cover type (the predomin
 # My Approach 
 
 A beginner kernel on multi-class classification using logistic regression and RandomForest for the Forest classification competition.
+My kernel was awarded as one of the top 5 kernels in the competition.
 
 https://www.kaggle.com/arjundas/forest-run
