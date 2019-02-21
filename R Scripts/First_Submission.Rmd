@@ -1,0 +1,238 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+ 
+```{r}
+library(xgboost)
+library(caret)
+
+## reading data
+train <- read.csv("train.csv" , header = TRUE , sep = ",")
+test <- read.csv("test.csv" , header = TRUE , sep = ",")
+sample_submission = read.csv("sample_submission.csv" , header = TRUE , sep = ",")
+
+## checking if all the columns are there in both train and test
+setdiff(names(train) , names(test))
+
+## removing the Id column
+train$Id = NULL
+test$Id = NULL
+
+## numeric setting
+train[] <- lapply(train, as.numeric)
+test[] <- lapply(test, as.numeric)
+
+#### Feature Engineering - Lathwal's kernel ####
+
+####################### Train data #############################################
+
+train$HF1 = train$Horizontal_Distance_To_Hydrology+train$Horizontal_Distance_To_Fire_Points
+train$HF2 = abs(train$Horizontal_Distance_To_Hydrology-train$Horizontal_Distance_To_Fire_Points)
+train$HR1 = abs(train$Horizontal_Distance_To_Hydrology+train$Horizontal_Distance_To_Roadways)
+train$HR2 = abs(train$Horizontal_Distance_To_Hydrology-train$Horizontal_Distance_To_Roadways)
+train$FR1 = abs(train$Horizontal_Distance_To_Fire_Points+train$Horizontal_Distance_To_Roadways)
+train$FR2 = abs(train$Horizontal_Distance_To_Fire_Points-train$Horizontal_Distance_To_Roadways)
+train$ele_vert = train$Elevation-train$Vertical_Distance_To_Hydrology
+
+train$slope_hyd = sqrt((train$Horizontal_Distance_To_Hydrology)^2+(train$Vertical_Distance_To_Hydrology)^2)
+
+#Mean distance to Amenities 
+train$Mean_Amenities=(train$Horizontal_Distance_To_Fire_Points + train$Horizontal_Distance_To_Hydrology + train$Horizontal_Distance_To_Roadways) / 3 
+#Mean Distance to Fire and Water 
+train$Mean_Fire_Hyd= (train$Horizontal_Distance_To_Fire_Points + train$Horizontal_Distance_To_Hydrology) / 2 
+
+####################### Test data #############################################
+test$HF1 = test$Horizontal_Distance_To_Hydrology+test$Horizontal_Distance_To_Fire_Points
+test$HF2 = abs(test$Horizontal_Distance_To_Hydrology-test$Horizontal_Distance_To_Fire_Points)
+test$HR1 = abs(test$Horizontal_Distance_To_Hydrology+test$Horizontal_Distance_To_Roadways)
+test$HR2 = abs(test$Horizontal_Distance_To_Hydrology-test$Horizontal_Distance_To_Roadways)
+test$FR1 = abs(test$Horizontal_Distance_To_Fire_Points+test$Horizontal_Distance_To_Roadways)
+test$FR2 = abs(test$Horizontal_Distance_To_Fire_Points-test$Horizontal_Distance_To_Roadways)
+test$ele_vert = test$Elevation-test$Vertical_Distance_To_Hydrology
+
+test$slope_hyd = sqrt((test$Horizontal_Distance_To_Hydrology)^2+(test$Vertical_Distance_To_Hydrology)^2)
+
+#Mean distance to Amenities 
+test$Mean_Amenities=(test$Horizontal_Distance_To_Fire_Points + test$Horizontal_Distance_To_Hydrology + test$Horizontal_Distance_To_Roadways) / 3 
+#Mean Distance to Fire and Water 
+test$Mean_Fire_Hyd=(test$Horizontal_Distance_To_Fire_Points + test$Horizontal_Distance_To_Hydrology) / 2 
+
+## xgboost labels starts with zero, will add 1 during final prediction
+train$target = train$Cover_Type - 1
+train$Cover_Type = NULL
+
+## removing zero variance variables
+train$Soil_Type7 = NULL
+train$Soil_Type15 = NULL
+
+test$Soil_Type7 = NULL
+test$Soil_Type15 = NULL
+
+## creating validation and train data
+set.seed(100)
+
+index = caret::createDataPartition(train$target , p = 0.9 , list = FALSE)
+tr = train [index , ]
+val = train[-index , ]
+
+set.seed(123)
+
+
+```
+
+
+```{r}
+set.seed(100)
+
+index = caret::createDataPartition(train$Cover_Type , p = 0.9 , list = FALSE)
+tr = train [index , ]
+val = train[-index , ]
+
+model_rf1 <- randomForest(factor(Cover_Type) ~ .,data =tr,ntree = 200,importance = TRUE)
+predicted_rf1 <- predict(model_rf1,val,type = "class")
+
+confusionMatrix(predicted_rf1,factor(val$Cover_Type))
+
+rf_roc <- multiclass.roc((val$Cover_Type),as.numeric(predicted_rf1))
+
+rf_roc
+
+```
+
+#Decision Tree
+
+```{r}
+library(rpart)
+library(rpart.plot)
+
+Dtree <- rpart(Cover_Type ~.,data = train,method = "class")
+summary(Dtree)
+Dpred <- predict(Dtree,val,type = "class")
+
+confusionMatrix(Dpred,factor(val$Cover_Type))
+
+rf_dt <- multiclass.roc((val$Cover_Type),as.numeric(Dpred))
+
+rf_dt
+
+```
+
+ 
+
+```{r}
+pd <- data.frame(train$Elevation,train$Aspect,train$Slope,train$Cover_Type)
+ggpairs(pd)
+```
+
+```{r}
+scale01 <- function(x){
+  (x - min(x)) / (max(x) - min(x))
+}
+
+train_1 <- train %>%
+  mutate(Elevation = scale01(Elevation), 
+         Aspect = scale01(Aspect), 
+         Slope = scale01(Slope) 
+         )
+```
+
+```{r}
+set.seed(123)
+Hab_NN1 <- neuralnet(Cover_Type ~ Elevation + Aspect + Slope, 
+                     data = train, 
+                     linear.output = FALSE, 
+                     err.fct = 'sse', 
+                     likelihood = TRUE)
+```
+
+
+```{r}
+plot(Hab_NN1, rep = 'best')
+```
+
+
+#Preparing the Cover Type data
+
+```{r,message=FALSE,warning=FALSE}
+
+CoverTypedata <- data.frame(id = numeric(),Description=character())
+
+CoverTypedata <- rbind(CoverTypedata,data.frame(id = 1,Description="Spruce/Fir"))
+CoverTypedata <- rbind(CoverTypedata,data.frame(id = 2,Description="Lodgepole Pine"))
+CoverTypedata <- rbind(CoverTypedata,data.frame(id = 3,Description="Ponderosa Pine"))
+CoverTypedata <- rbind(CoverTypedata,data.frame(id = 4,Description="Cottonwood/Willow"))
+CoverTypedata <- rbind(CoverTypedata,data.frame(id = 5,Description="Aspen"))
+CoverTypedata <- rbind(CoverTypedata,data.frame(id = 6,Description="Douglas-fir"))
+CoverTypedata <- rbind(CoverTypedata,data.frame(id = 7,Description="Krummholz"))
+
+train <- inner_join(train,CoverTypedata,by = c("Cover_Type" = "id"))
+
+
+```
+
+```{r}
+ggplot(train,aes(x=Slope,y=Elevation,color=Description,size=Aspect))+geom_point(alpha=0.6)+labs(title="Cover Type with Slope and Elevation")
+```
+
+```{r}
+ggplot(train,aes(x=Horizontal_Distance_To_Hydrology,y=Horizontal_Distance_To_Roadways,color=Description,size=Horizontal_Distance_To_Roadways))+geom_point(alpha=0.6)+labs(title="Cover Type with distance to Roadways and Hydrology")
+```
+
+```{r}
+ggplot(train, 
+  aes(x = Hillshade_9am, 
+      y = Hillshade_Noon)) +
+  geom_point(aes(colour = Description),
+             size = 2) +
+  geom_smooth(method="lm") +
+  labs(x = "Hillshade_9am",
+       y = "Hillshade_Noon",
+       title = "Is there any relationship between Hillshades and Cover Types?"
+       ) +
+ 
+  theme_minimal() +
+  theme(text = element_text(size=16))
+```
+
+
+```{r}
+Ensemble_GBM <- train(factor(Cover_Type)~., data = train, trControl=trainControl(method = 'cv', number = 5), method="gbm")
+
+Predprob1_Ensemble_GBM = predict(Ensemble_GBM, test)
+
+```
+
+```{r}
+predictions <- predict.SuperLearner(model, newdata=xtest)
+
+conv.preds <- if_else(predictions$pred >0.5,1,0)
+
+library(caret)
+
+confusion_matrix <- table(conv.preds,ytest)
+
+tn <- confusion_matrix[1]
+tp <- confusion_matrix[4]
+fp <- confusion_matrix[3]
+fn <- confusion_matrix[2]
+
+accuracy <- (tp + tn) / (tp + tn + fp + fn)
+misclassification_rate <- 1 - accuracy
+recall <- tp / (tp + fn)
+precision <- tp / (tp + fp)
+null_error_rate <- tn / (tp + tn + fp + fn)
+f1_score <- 2*((precision * recall)/(precision + recall))
+
+tibble(
+    accuracy,
+    misclassification_rate,
+    recall,
+    precision,
+    null_error_rate,
+    f1_score
+) %>% 
+    transpose() 
+```
+

@@ -1,0 +1,131 @@
+---
+
+title: "What the Forest !!!"
+
+output:
+
+  html_document:
+
+    number_sections: false
+
+    toc: true
+
+    fig_width: 8
+
+    fig_height: 6
+
+    theme: cosmo
+
+    highlight: tango
+
+    code_folding: hide
+
+---
+
+
+
+
+
+
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+
+```{r}
+library(tidyverse)
+library(caret)
+library(GGally)
+library(treemap)
+```
+
+```{r}
+ggplot(train,aes(Elevation))+geom_histogram(binwidth = 10)
+```
+
+```{r}
+ggplot(train,aes(Aspect))+geom_histogram(binwidth = 5)
+
+```
+
+```{r}
+ggplot(train,aes(Slope))+geom_histogram(binwidth = 1)
+
+```
+
+# Boxplots are an alternative way to illustrate the distribution of a variable and is a concise way to illustrate the standard quantiles and outliers of data.
+
+```{r}
+p1 <- ggplot(train, aes("var", Elevation)) +
+  geom_boxplot(outlier.alpha = .25) +
+  scale_y_log10(
+    
+    breaks = quantile(train$Elevation)
+  )
+
+p2 <- ggplot(train, aes("var", Elevation)) +
+  geom_point() +
+  geom_violin() +
+  scale_y_log10(
+    
+    breaks = quantile(train$Elevation)
+  )
+
+gridExtra::grid.arrange(p1, p2, ncol = 2)
+```
+
+```{r}
+ggplot(train, aes(x = Elevation, y = Slope )) +
+  geom_point(aes(color = target)) +
+  geom_smooth(se = FALSE)
+```
+
+```{r}
+train %>%
+  ggplot(aes(x = Cover_Type, y = "Aspect")) +
+  geom_boxplot() +
+  coord_flip() +
+  labs(x = "Cover Type",
+       y = "Aspect in degrees from azimut",
+       title = "Cover Types by aspect")
+```
+
+
+
+
+
+```{r}
+train <- read.csv("train.csv")
+test <- read.csv("test.csv")
+
+model <- multinom(Cover_Type ~ .,data = train)
+summary(model)
+
+result <- predict(model,test,"probs")
+
+
+predicted <- colnames(result)[apply(result,1,which.max)]
+predicted <- as.numeric(predicted)
+predicted <- predicted
+test$results <- predicted
+
+solution <-data.frame('Id' = test$Id,'Cover_Type' = test$results)
+solution$Id = as.numeric(solution$Id)
+solution$Cover_Type = as.numeric(solution$Cover_Type)
+
+
+write.csv(solution,file = "First_try.csv",row.names = F)
+
+```
+
+```{r}
+library(randomForest)
+
+model_rf <- randomForest(factor(Cover_Type) ~ .,data =train,ntree = 200,importance = TRUE)
+
+prediction <- predict(model_rf,test,type = "class")
+```
+

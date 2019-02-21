@@ -1,0 +1,133 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+
+```{r}
+train <- read.csv("train.csv")
+test <- read.csv("test.csv")
+```
+
+
+```{r}
+NormalizeDataSet <- function(train) {
+  train$Elevation<-normalize(train$Elevation)
+  train$Horizontal_Distance_To_Hydrology<-normalize(train$Horizontal_Distance_To_Hydrology)
+  train$Horizontal_Distance_To_Roadways<-normalize(train$Horizontal_Distance_To_Roadways)
+  train$Aspect<-normalize(train$Aspect)
+  train$Slope<-normalize(train$Slope)
+  train$Hillshade_9am<-normalize(train$Hillshade_9am)
+  train$Hillshade_3pm<-normalize(train$Hillshade_3pm)
+  train$Hillshade_Noon<-normalize(train$Hillshade_Noon)
+  train$Vertical_Distance_To_Hydrology <-normalize(train$Vertical_Distance_To_Hydrology)
+  
+  return(train)
+}
+
+train <- NormalizeDataSet(train)
+
+test <- NormalizeDataSet(test)
+
+
+
+```
+
+```{r}
+train2 = train %>% select(-Id,-Cover_Type,-Description)
+
+
+features <- colnames(train2)
+
+for (f in features) {
+  if ((class(train2[[f]])=="factor") || (class(train2[[f]])=="character")) {
+    levels <- unique(train2[[f]])
+    train2[[f]] <- as.numeric(factor(train2[[f]], levels=levels))
+  }
+}
+
+train2$Cover_Type = as.factor(train$Cover_Type)
+levels(train2$Cover_Type) = make.names(unique(train2$Cover_Type))
+
+ID = test$Id
+test = test %>% select(-Id)
+
+features <- colnames(test)
+
+for (f in features) {
+  if ((class(test[[f]])=="factor") || (class(test[[f]])=="character")) {
+    levels <- unique(test[[f]])
+    test[[f]] <- as.numeric(factor(test[[f]], levels=levels))
+  }
+}
+```
+
+
+```{r}
+formula = Cover_Type ~ .
+
+fitControl <- trainControl(method="none",number = 3,classProbs = TRUE)
+
+xgbGrid <- expand.grid(nrounds = 1000,
+                       max_depth = 4,
+                       eta = .05,
+                       gamma = 0,
+                       colsample_bytree = .8,
+                       min_child_weight = 1,
+                       subsample = 1)
+
+set.seed(13)
+
+CoverTypeXGB = train(formula, data = train2,
+                        method = "xgbTree",trControl = fitControl,
+                        tuneGrid = xgbGrid,na.action = na.pass,
+                        objective='multi:softprob',
+                   num_class=length(unique(train2$Cover_Type)))
+
+```
+
+
+```{r}
+importance = varImp(CoverTypeXGB)
+
+varImportance <- data.frame(Variables = row.names(importance[[1]]), 
+                            Importance = round(importance[[1]]$Overall,2))
+
+# Create a rank variable based on importance
+rankImportance <- varImportance %>%
+  mutate(Rank = paste0('#',dense_rank(desc(Importance)))) %>%
+  head(10)
+
+rankImportancefull = rankImportance
+
+ggplot(rankImportance, aes(x = reorder(Variables, Importance), 
+                           y = Importance)) +
+  geom_bar(stat='identity',colour="white") +
+  geom_text(aes(x = Variables, y = 1, label = Rank),
+            hjust=0, vjust=.5, size = 4, colour = 'black',
+            fontface = 'bold') +
+  labs(x = 'Variables', title = 'Relative Variable Importance') +
+  coord_flip() + 
+  theme_bw()
+```
+
+```{r}
+predictions = predict(CoverTypeXGB,test,na.action = na.pass)
+
+predictions = str_sub(predictions,2)
+
+# Save the solution to a dataframe
+solution <- data.frame('Id' = ID, 'Cover_Type'= predictions)
+
+options(scipen = 999)
+
+solution$Id = as.numeric(solution$Id)
+solution$Cover_Type = as.numeric(solution$Cover_Type)
+
+head(solution)
+
+# Write it to file
+write.csv(solution, 'ForestCoverXGB.csv', row.names = F)
+
+```
